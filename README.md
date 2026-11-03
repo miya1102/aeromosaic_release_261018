@@ -1,63 +1,174 @@
-# AeroMosaic camera-ready code release (staged)
+<h1 align="center">AeroMosaic</h1>
 
-This is a curated, de-anonymized source package for **AeroMosaic: Transport-Aware Multimodal Evidence Fusion for Atmospheric Pollution Risk Inference**, kept separate from the mutable experiment tree. It is staged for public release review; the project-code license and baselines are intentionally unresolved/excluded.
+<p align="center">
+  <strong>Transport-Aware Spatiotemporal Multimodal Learning for Atmospheric Pollution Risk</strong><br>
+  Muyang Zheng, Jiaming Ma, Zongyu Zhang, Qingsong Wen
+</p>
 
-## Main-table provenance is authoritative (2026-10-17)
+<p align="center">
+  <img alt="NeurIPS 2026" src="https://img.shields.io/badge/NeurIPS-2026-4b44ce">
+  <img alt="Python 3.11" src="https://img.shields.io/badge/Python-3.11-3776ab?logo=python&logoColor=white">
+  <img alt="CUDA 12.4" src="https://img.shields.io/badge/CUDA-12.4-76b900?logo=nvidia&logoColor=white">
+  <img alt="Backbone ChatTS-8B" src="https://img.shields.io/badge/Backbone-ChatTS--8B-ff7f0e">
+</p>
 
-The public main entry point is tied to the archived experiment that generated the paper's six-region means: `abl_AC` from 2026-04-16. It invokes `pipeline/train_balanced_gc_ablation.py` and `pipeline/eval_dagresidual_ablation.py`, uses seeds `42/123/456` configured in `configs/paths.yaml`, enables precipitation prompts, DAG residual propagation, root-region fusion, root-aware loss and LoRA, and applies `--ablation_mask 0,11,12` during both training and evaluation. Eighteen archived evaluation summaries were audited outside this source package; their per-seed statistics and all 24 four-decimal mean/SD checks are recorded in `provenance/main_table_abl_AC_aggregate.json`. The individual historical summaries are not required to run the software and are not redistributed.
+<p align="center">
+  <a href="#overview">Overview</a> ·
+  <a href="#results">Results</a> ·
+  <a href="#repository-layout">Layout</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#reproducing-the-paper">Reproduction</a> ·
+  <a href="#citation">Citation</a>
+</p>
 
-A **bundle** is simply the processed software input produced by a data builder: one regional directory containing train/validation/test JSONL indices plus per-date tensors, DAG metadata, city names, parent counts and prompts. The six historical experiment-time bundles named in `configs/paths.example.yaml` are the provenance authority for exact main-table reruns. They are not interchangeable with bundles produced by the later `scripts/prepare_camera_ready_data.py` reconstruction. The BTH frozen graph uses an earlier weighted, last-historical-wind implementation; the YRD/SDP/ZHD/CJD/CYB frozen graphs use the legacy canonical binary implementation with target-date mean wind, an approximately 300-km candidate rule, a 60-degree alignment rule and no BTH-style three-parent cap. The paper and this release disclose that distinction rather than relabeling the historical assets as outputs of one unified builder.
+## Overview
 
-The later unified binary/last-historical builder remains available as a reconstruction and prospective-data utility. It does **not** reproduce the five-region main-table graphs and is not called by the main-table runner. The root-aware training objective implemented by the archived code is `sum_i(w_i CE_i) / sum_i(w_i)`. `scripts/aggregate_camera_ready.py` reads the archived output layout, uses population standard deviation (`ddof=0`), and verifies all rounded main-table means. No full experiment was rerun during this alignment revision.
+AeroMosaic infers the PM<sub>2.5</sub> risk class (six levels) of every city in a region on a target date. It assigns heterogeneous atmospheric signals to distinct paths and fuses them under a daily directed transport prior:
 
-See `provenance/README.md` for the preserved launcher hash, byte-identical train/evaluation source hashes, the per-seed aggregate, and the successful checks for all 12 main-table means and 12 population standard deviations.
+| Signal | Path in AeroMosaic |
+|---|---|
+| Historical PM<sub>2.5</sub> and time channels | Learnable numerical prefix tokens of the language-model backbone |
+| Recent precipitation | Compact rule-based prompt text |
+| Wind-driven transport | Daily DAG that selects upstream context and drives post-pooling residual propagation |
 
-## Scope and reproducibility boundary
+```mermaid
+flowchart LR
+    X["Historical numerical input<br/>(L = 8, D = 13)"] --> F["Root-region fusion"]
+    F --> P["Numerical projector<br/>K = 4 prefix tokens"]
+    R["Precipitation history"] --> T["Rule-based<br/>precipitation text"]
+    W["Wind field + city coordinates"] --> G["Daily wind-driven DAG"]
+    G --> Q["Prompt: DAG level and<br/>upstream parent context"]
+    T --> Q
+    P --> B["ChatTS-8B + LoRA"]
+    Q --> B
+    B --> H["Masked mean pooling<br/>city embeddings"]
+    H --> D["Post-pooling DAG residual"]
+    G --> D
+    D --> Y["Six-class risk logits"]
+```
 
-The package contains AeroMosaic training/evaluation code, DAG/data-preparation and diagnostic utilities, a camera-ready six-region/three-seed runner and aggregator, a curated ChatTS source tree, and the self-contained BTH `8x14` prepared bundle needed by the matched no-oracle diagnostics. It does not redistribute the six frozen main-table bundles, general KnowAir/PM2.5-GNN processed data or station metadata, the legacy terrain raster, ChatTS/Qwen model weights, trained LoRA adapters, experiment outputs, caches, or copied baseline implementations.
+> [!NOTE]
+> The main results use the oracle parent-label protocol, in which the prompt of each non-root city contains the target-date labels of its DAG parents. The same prompt field also supports no-oracle protocols (no parent context, predicted parent classes, or historical upstream PM<sub>2.5</sub>); see the paper appendix.
 
-To prepare software inputs, obtain the processed KnowAir [`his.npz` from the CauAir repository](https://github.com/PoorOtterBob/CauAir/tree/main/data_knowair/24_24/all), the original `KnowAir.npy`, and the exact ChatTS checkpoint separately, subject to upstream terms. The upstream [PM2.5-GNN Dataset instructions](https://github.com/shuowang-ai/PM2.5-GNN#dataset) point to the original KnowAir archive ([Zenodo DOI 10.5281/zenodo.23339627](https://doi.org/10.5281/zenodo.23339627)) and list Google Drive and Baidu Cloud mirrors (Baidu access code `t82d`). `scripts/prepare_camera_ready_data.py` consumes CauAir's processed `his.npz` together with aligned raw precipitation from `KnowAir.npy` and builds all six runnable regional bundles. No additional raw-to-`his.npz` conversion is required for this packaged workflow. Do not substitute KnowAir-V2 and describe it as the camera-ready input.
+## Results
 
-The upstream PM2.5-GNN repository also contains the supporting geospatial files: [`city.txt`](https://github.com/shuowang-ai/PM2.5-GNN/blob/main/data/city.txt) (city coordinates/order), [`station_info.csv`](https://github.com/shuowang-ai/PM2.5-GNN/blob/main/data/station_info.csv) (monitoring-station metadata), and [`altitude.npy`](https://github.com/shuowang-ai/PM2.5-GNN/blob/main/data/altitude.npy) (elevation grid). Its [`dataset.py`](https://github.com/shuowang-ai/PM2.5-GNN/blob/main/dataset.py) shows its upstream raw-array loading, meteorological feature selection, wind-speed/direction and time-feature construction, and normalization; [`graph.py`](https://github.com/shuowang-ai/PM2.5-GNN/blob/main/graph.py) shows its coordinate/altitude-based graph setup. The included six-region preparation script reads `city.txt` for city names, indices, and coordinates; it does not read `station_info.csv` or `altitude.npy`, and it does not apply a terrain filter. The upstream files are pointers, not proof of byte identity with experiment assets. The elevation product lineage and redistribution terms remain unresolved. The script requires a pre-existing normalized `his.npz`; see `docs/reproduction.md` for its exact boundary and DAG construction. Validate generated bundles against `docs/data_contract.md`.
+Macro-F1 / Micro-F1 on the six regional benchmarks (mean over seeds 42, 123, 456; 2015–2016 train, 2017 validation, 2018 test). The strongest of thirteen time-series and air-quality baselines is shown for reference.
 
-The exact ChatTS checkpoint is `bytedance-research/ChatTS-8B` at revision `7216a84034063c2d394901fe45d20a1e8d773a1f`; see the model page and upstream source below. Checkpoint and processed data are not included.
+| Region | AeroMosaic | Strongest baseline |
+|---|---|---|
+| BTH | **0.7239** / **0.8387** | 0.5255 / 0.6393 |
+| YRD | **0.5976** / **0.7671** | 0.4833 / 0.6815 |
+| SDP | **0.6218** / **0.8166** | 0.4435 / 0.6103 |
+| ZHD | **0.6466** / **0.7861** | 0.5249 / 0.6461 |
+| CJD | **0.5499** / **0.8674** | 0.5295 / 0.7777 |
+| CYB | **0.6802** / **0.8551** | 0.5258 / 0.7410 |
 
-The supplied runner mirrors the archived `abl_AC` configuration rather than the later unified reconstruction. It covers BTH/YRD/SDP/ZHD/CJD/CYB, the 2015--2016/2017/2018 split, seeds 42/123/456, and mask `{0,11,12}`. Archived BTH no-oracle controls remain separate single-run diagnostics with raw input shape `8x14`; they must not be mixed with the primary `8x13` oracle protocol. Their prepared source is distributed at `data/bth_no_oracle_source_8x14`; its indexed paths are release-root-relative and all referenced files are inside that directory. A fresh environment install and a fresh 18-run regeneration remain unverified. Baseline source commit and entrypoint hashes are recorded in `docs/baseline_reproduction.md`, but their paper-specific command/data mapping is not verified and implementations are not redistributed.
+Per-seed values and the aggregation check are recorded in [`provenance/main_table_abl_AC_aggregate.json`](provenance/main_table_abl_AC_aggregate.json).
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| [`pipeline/`](pipeline) | Training and evaluation code (DAG residual, root-region fusion, root-aware loss, LoRA) |
+| [`scripts/`](scripts) | Data preparation, data-contract validation, the six-region runner, and the aggregator |
+| [`diagnostics/`](diagnostics) | Oracle-access and no-oracle analyses |
+| [`data/bth_no_oracle_source_8x14/`](data/bth_no_oracle_source_8x14) | Prepared BTH input for the no-oracle analyses |
+| [`configs/`](configs) | Path template and seeds |
+| [`provenance/`](provenance) | Archived launcher, source hashes, and per-seed main-table aggregate |
+| [`docs/`](docs) | Reproduction guide, data contract, paper–code alignment, troubleshooting |
+| [`ChatTS/`](ChatTS) | Curated upstream ChatTS source (no weights) |
+
+## Quick start
+
+```bash
+conda env create -f environment.yml
+conda activate aeromosaic-repro
+cp configs/paths.example.yaml configs/paths.yaml   # then fill in local paths
+python scripts/smoke_test_data_free.py --check-cli
+python scripts/run_camera_ready_oracle.py --config configs/paths.yaml --dry-run
+```
+
+The backbone is [`bytedance-research/ChatTS-8B`](https://huggingface.co/bytedance-research/ChatTS-8B) at revision `7216a84034063c2d394901fe45d20a1e8d773a1f`. Model weights and processed observations are not included in this repository.
+
+## Reproducing the paper
+
+<details>
+<summary><strong>1. Obtain the external inputs</strong></summary>
+
+- Processed KnowAir `his.npz` (13 channels, 184 cities) from the [CauAir repository](https://github.com/PoorOtterBob/CauAir/tree/main/data_knowair/24_24/all).
+- Raw `KnowAir.npy` for unstandardized precipitation, following the [PM2.5-GNN dataset instructions](https://github.com/shuowang-ai/PM2.5-GNN#dataset) ([Zenodo DOI 10.5281/zenodo.23339627](https://doi.org/10.5281/zenodo.23339627)).
+- City coordinates [`city.txt`](https://github.com/shuowang-ai/PM2.5-GNN/blob/main/data/city.txt) from PM2.5-GNN.
+- The ChatTS-8B checkpoint at the revision above.
+
+The 13 channels are PM<sub>2.5</sub>; 2 m temperature, boundary-layer height, K-index, 950 hPa relative humidity, surface pressure; total precipitation; 950 hPa u and v wind, wind speed, wind direction; hour; weekday.
+
+</details>
+
+<details>
+<summary><strong>2. Prepare and validate regional bundles</strong></summary>
+
+A bundle is one regional directory with train/validation/test indices, per-date tensors, DAG metadata, city names, parent counts, and prompts.
+
+```bash
+python scripts/prepare_camera_ready_data.py --help
+python scripts/validate_data_contract.py --bundle /path/to/BTH_bundle --project-root . --region BTH
+```
+
+The main table was produced from the experiment-time bundles listed in [`configs/paths.example.yaml`](configs/paths.example.yaml). Their DAG builder settings per dataset are:
+
+| Dataset | Wind estimate | Radius | Alignment | Parent cap | Edge weight |
+|---|---|---|---|---|---|
+| BTH | Persistence (last historical step) | 600 km | cos θ ≥ 0.25 | 3 | Edge score |
+| YRD, SDP, ZHD, CJD, CYB | Target-day mean (forecast proxy) | ≈300 km | θ ≤ 60° | None | Binary |
+
+[`scripts/prepare_camera_ready_data.py`](scripts/prepare_camera_ready_data.py) builds new bundles for all six regions with persistence wind, a 600 km radius, cos θ ≥ 0.25, at most three parents, and binary edges. See [`docs/data_and_dag_provenance_audit.md`](docs/data_and_dag_provenance_audit.md) for details.
+
+</details>
+
+<details>
+<summary><strong>3. Train, evaluate, and aggregate</strong></summary>
+
+```bash
+python scripts/run_camera_ready_oracle.py --config configs/paths.yaml
+python scripts/aggregate_camera_ready.py \
+  --runs-root /path/to/aeromosaic-results \
+  --out /path/to/aeromosaic-results/camera_ready_aggregate.json
+```
+
+The runner trains and evaluates all six regions with seeds 42, 123, and 456 using [`pipeline/train_balanced_gc_ablation.py`](pipeline/train_balanced_gc_ablation.py) and [`pipeline/eval_dagresidual_ablation.py`](pipeline/eval_dagresidual_ablation.py). The numerical projector receives channels `{0, 11, 12}` (PM<sub>2.5</sub> and time); key settings are learning rate 1e-4, 3 epochs, gradient accumulation 2, LoRA rank 16 / alpha 32, root-region fusion weight 0.8, and root-aware loss weights r<sub>base</sub> = 1.5, e<sub>3</sub> = 2.0, e<sub>4</sub> = 3.0, w<sub>max</sub> = 4.0.
+
+</details>
+
+<details>
+<summary><strong>4. No-oracle analyses (BTH)</strong></summary>
+
+```bash
+python scripts/validate_bth_no_oracle_bundle.py --release-root .
+```
+
+The prepared input in `data/bth_no_oracle_source_8x14` has raw shape `8x14` and is used only for the no-oracle and oracle-access analyses. Builders for each protocol are in [`diagnostics/`](diagnostics) and [`scripts/`](scripts); see [`docs/reproduction.md`](docs/reproduction.md).
+
+</details>
+
+> [!TIP]
+> [`docs/reproduction.md`](docs/reproduction.md) gives the complete command sequence, and [`docs/troubleshooting.md`](docs/troubleshooting.md) covers common environment issues.
 
 ## Upstream assets
 
-- ChatTS source: <https://github.com/NetManAIOps/ChatTS>
+- ChatTS source: <https://github.com/NetManAIOps/ChatTS> (curated subset in [`ChatTS/`](ChatTS), byte-identical to upstream commit `a16ca1a`; see [`ChatTS/AEROMOSAIC_INTEGRATION.md`](ChatTS/AEROMOSAIC_INTEGRATION.md))
 - ChatTS-8B model: <https://huggingface.co/bytedance-research/ChatTS-8B>
-- PM2.5-GNN / KnowAir project: <https://github.com/shuowang-ai/PM2.5-GNN>
-- CauAir source and processed KnowAir `his.npz`: <https://github.com/PoorOtterBob/CauAir/tree/main/data_knowair/24_24/all>
+- PM2.5-GNN / KnowAir: <https://github.com/shuowang-ai/PM2.5-GNN>
+- CauAir and processed KnowAir `his.npz`: <https://github.com/PoorOtterBob/CauAir>
 
-The `ChatTS/` directory contains a curated source subset, its upstream README, requirements, and LICENSE; it does not contain model weights or Git metadata. Every included file that also exists at upstream commit `a16ca1a7bd2d0cbe1dd40af37cb5658e7008357e` is byte-identical after the final source audit. Unrelated upstream directories are intentionally omitted. AeroMosaic does not patch ChatTS's data-generation or vLLM utilities; the paper-aligned pipeline uses the external checkpoint through Transformers and implements AeroMosaic-specific logic under `pipeline/`. See `ChatTS/AEROMOSAIC_INTEGRATION.md`. Review all third-party license obligations before public distribution. The paper's model repository/revision is `bytedance-research/ChatTS-8B` / `7216a84034063c2d394901fe45d20a1e8d773a1f`; model-card terms are separate. Historical processed KnowAir/station/terrain licensing is unresolved; those general assets remain excluded. The separately bundled BTH no-oracle prepared input is included at the author's direction and is documented as preserved experiment-time input rather than a public-raw-data reconstruction.
-
-## Environment and execution
-
-The research scripts were developed on Linux with CUDA and a large-memory NVIDIA GPU. `environment.yml` pins direct dependencies and `configs/paths.example.yaml` provides a portable template, including the authoritative seeds `[42, 123, 456]`; local `configs/paths.yaml` is ignored. The runner reads and validates those YAML seeds. Use Python 3.11 and CUDA 12.4, then follow `docs/reproduction.md`.
-
-The main-table training/evaluation entry points are `pipeline/train_balanced_gc_ablation.py` and `pipeline/eval_dagresidual_ablation.py`; orchestration and aggregation are `scripts/run_camera_ready_oracle.py` and `scripts/aggregate_camera_ready.py`. Other pipeline files are retained for diagnostics and historical comparison but are not the main-table authority. A fresh clean-environment CLI smoke and a fresh 18-run regeneration remain unverified; missing dependencies may surface before model/data loading. Processed observations and model weights are intentionally external.
+Third-party code, data, and model weights remain subject to their original licenses and terms.
 
 ## Citation
 
 ```bibtex
 @inproceedings{zheng2026aeromosaic,
-  title     = {AeroMosaic: Transport-Aware Multimodal Evidence Fusion for Atmospheric Pollution Risk Inference},
+  title     = {AeroMosaic: Transport-Aware Spatiotemporal Multimodal Learning for Atmospheric Pollution Risk},
   author    = {Zheng, Muyang and Ma, Jiaming and Zhang, Zongyu and Wen, Qingsong},
   booktitle = {Advances in Neural Information Processing Systems},
   year      = {2026}
 }
 ```
-
-Update this citation with final proceedings metadata and the public repository URL once available.
-
-## Current verification and release status
-
-This package passed manifest integrity, Python syntax, data-free smoke, paper-protocol unit tests, full-shape synthetic six-region construction, BTH/YRD generic and paper-protocol validation, three-seed runner dry-run, and aggregate-statistics checks. The validator also rejects non-integer/out-of-range labels, non-finite tensors, malformed graph arrays and region-size mismatches. These are software/interface tests; no real training or paper-result regeneration was performed.
-
-A clean environment and model-dependent CLI smoke remain unverified. Depending on the starting environment, missing packages such as PyTorch, PEFT or other pinned dependencies may fail before model/data loading. The historical one-group execution check used external dependencies available at that time and is not evidence of a clean install today. No research environment was modified during final packaging.
-
-Historical BTH DAG/prompt parity applies specifically to `scripts/build_bth_group_bundle.py`, the legacy audit utility. The prospective six-region builder uses a different binary/last-historical contract, and the five non-BTH main-table bundles use their disclosed historical target-day-weather protocol. See [the current provenance statement](docs/data_and_dag_provenance_audit.md).
-
-The package is publicly released at https://github.com/miya1102/aeromosaic_release_261018. Project-code licensing and complete paper-specific baseline reproduction remain intentionally deferred. Exact historical main-table AeroMosaic reruns still require the six external frozen bundles and the external ChatTS checkpoint; the matched BTH no-oracle source bundle is included. See `RELEASE_CHECKLIST.md`, `docs/reproduction.md`, `docs/baseline_reproduction.md`, and `MANIFEST.sha256`.

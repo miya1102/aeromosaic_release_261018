@@ -99,11 +99,11 @@ def _forward_focal(self, input_ids=None, attention_mask=None, raw_ts=None,
 
     # Replicate forward but with focal modulation on the loss
     if raw_ts is None:
-        raise ValueError("forward 缺少 raw_ts")
+        raise ValueError("forward() is missing raw_ts")
     if input_ids is None or attention_mask is None:
-        raise ValueError("forward 缺少 input_ids/attention_mask")
+        raise ValueError("forward() is missing input_ids/attention_mask")
     if self.dag_residual_enable and dag_adj is None:
-        raise ValueError("dag_residual_enable=True 时 forward 缺少 dag_adj")
+        raise ValueError("forward() requires dag_adj when dag_residual_enable=True")
 
     inputs_embeds, full_mask = self._build_prefixed_inputs(
         input_ids, attention_mask, raw_ts)

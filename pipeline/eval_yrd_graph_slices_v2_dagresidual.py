@@ -63,7 +63,7 @@ def normalize_raw_ts(raw_ts: Any, expect_shape: Tuple[int, int]) -> np.ndarray:
     if arr.ndim == 1 and arr.size == h * w:
         arr = arr.reshape(h, w)
     if arr.shape != (h, w):
-        raise ValueError(f"raw_ts shape 异常，期望 {(h, w)}，实际 {arr.shape}")
+        raise ValueError(f"Unexpected raw_ts shape: expected {(h, w)}, got {arr.shape}")
     return arr.astype(np.float32)
 
 
@@ -146,7 +146,7 @@ class DagResidualBlock(nn.Module):
         elif self.norm_mode == "none":
             A_norm = A
         else:
-            raise ValueError(f"不支持的 dag_residual_norm: {self.norm_mode}")
+            raise ValueError(f"Unsupported dag_residual_norm: {self.norm_mode}")
 
         h = pooled.float()
         m = A_norm @ self.msg_proj(h)
@@ -246,11 +246,11 @@ class RawTsPrefixSequenceClassifier(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, raw_ts=None, dag_adj=None, dag_level=None, labels=None, is_root=None, **kwargs):
         if raw_ts is None:
-            raise ValueError("forward 缺少 raw_ts")
+            raise ValueError("forward() is missing raw_ts")
         if input_ids is None or attention_mask is None:
-            raise ValueError("forward 缺少 input_ids/attention_mask")
+            raise ValueError("forward() is missing input_ids/attention_mask")
         if self.dag_residual_enable and dag_adj is None:
-            raise ValueError("dag_residual_enable=True 时 forward 缺少 dag_adj")
+            raise ValueError("forward() requires dag_adj when dag_residual_enable=True")
 
         inputs_embeds, full_mask = self._build_prefixed_inputs(input_ids, attention_mask, raw_ts)
         kwargs.pop("inputs_embeds", None)
@@ -478,9 +478,9 @@ def predict_group(
     )
 
     if raw_ts.ndim != 3 or raw_ts.shape[1:] != raw_ts_shape:
-        raise ValueError(f"raw_ts shape 异常: {raw_ts.shape}, expect=(*,{raw_ts_shape[0]},{raw_ts_shape[1]})")
+        raise ValueError(f"Unexpected raw_ts shape: {raw_ts.shape}, expect=(*,{raw_ts_shape[0]},{raw_ts_shape[1]})")
     if dag_adj.ndim != 2 or dag_adj.shape[0] != dag_adj.shape[1] or dag_adj.shape[0] != raw_ts.shape[0]:
-        raise ValueError(f"dag_adj shape 异常: {dag_adj.shape}, raw_ts={raw_ts.shape}")
+        raise ValueError(f"Unexpected dag_adj shape: {dag_adj.shape}, raw_ts={raw_ts.shape}")
 
     raw_ts = maybe_fuse_root_raw_ts(
         raw_ts=raw_ts,

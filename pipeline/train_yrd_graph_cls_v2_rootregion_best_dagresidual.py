@@ -119,7 +119,7 @@ def save_json(path: str, obj: Any) -> None:
 def parse_shape(text: str) -> Tuple[int, int]:
     vals = [int(x.strip()) for x in text.split(",") if x.strip()]
     if len(vals) != 2:
-        raise ValueError(f"--raw_ts_shape 期望形如 8,13，实际收到: {text}")
+        raise ValueError(f"--raw_ts_shape must look like 8,13, got: {text}")
     return vals[0], vals[1]
 
 
@@ -143,7 +143,7 @@ def normalize_raw_ts(raw_ts: Any, expect_shape: Tuple[int, int]) -> np.ndarray:
     if arr.ndim == 1 and arr.size == h * w:
         arr = arr.reshape(h, w)
     if arr.shape != (h, w):
-        raise ValueError(f"raw_ts shape 异常，期望 {(h, w)}，实际 {arr.shape}")
+        raise ValueError(f"Unexpected raw_ts shape: expected {(h, w)}, got {arr.shape}")
     return arr.astype(np.float32)
 
 
@@ -235,11 +235,11 @@ class DagResidualBlock(nn.Module):
         if dag_adj is None:
             return pooled
         if dag_adj.ndim != 2:
-            raise ValueError(f"dag_adj 期望 [N,N]，实际 {tuple(dag_adj.shape)}")
+            raise ValueError(f"dag_adj must have shape [N,N], got {tuple(dag_adj.shape)}")
         if pooled.ndim != 2:
-            raise ValueError(f"pooled 期望 [N,D]，实际 {tuple(pooled.shape)}")
+            raise ValueError(f"pooled must have shape [N,D], got {tuple(pooled.shape)}")
         if dag_adj.shape[0] != dag_adj.shape[1] or dag_adj.shape[0] != pooled.shape[0]:
-            raise ValueError(f"dag_adj / pooled 维度不匹配: dag_adj={tuple(dag_adj.shape)}, pooled={tuple(pooled.shape)}")
+            raise ValueError(f"dag_adj and pooled dimensions do not match: dag_adj={tuple(dag_adj.shape)}, pooled={tuple(pooled.shape)}")
 
         base_dtype = pooled.dtype
         A = dag_adj.to(device=pooled.device, dtype=torch.float32).clamp(min=0.0)
@@ -249,7 +249,7 @@ class DagResidualBlock(nn.Module):
         elif self.norm_mode == "none":
             A_norm = A
         else:
-            raise ValueError(f"不支持的 dag_residual_norm: {self.norm_mode}")
+            raise ValueError(f"Unsupported dag_residual_norm: {self.norm_mode}")
 
         h = pooled.float()
         m = A_norm @ self.msg_proj(h)
@@ -397,11 +397,11 @@ class RawTsPrefixSequenceClassifier(nn.Module):
 
     def forward(self, input_ids=None, attention_mask=None, raw_ts=None, dag_adj=None, dag_level=None, labels=None, is_root=None, **kwargs):
         if raw_ts is None:
-            raise ValueError("forward 缺少 raw_ts")
+            raise ValueError("forward() is missing raw_ts")
         if input_ids is None or attention_mask is None:
-            raise ValueError("forward 缺少 input_ids/attention_mask")
+            raise ValueError("forward() is missing input_ids/attention_mask")
         if self.dag_residual_enable and dag_adj is None:
-            raise ValueError("dag_residual_enable=True 时 forward 缺少 dag_adj")
+            raise ValueError("forward() requires dag_adj when dag_residual_enable=True")
 
         inputs_embeds, full_mask = self._build_prefixed_inputs(input_ids, attention_mask, raw_ts)
         kwargs.pop("inputs_embeds", None)
@@ -570,13 +570,13 @@ class DagGroupDataset(Dataset):
         is_root = np.load(row["is_root_path"]).astype(np.int64)
 
         if raw_ts.ndim != 3 or raw_ts.shape[1:] != self.raw_ts_shape:
-            raise ValueError(f"raw_ts shape 异常: {raw_ts.shape}, expect=(*,{self.raw_ts_shape[0]},{self.raw_ts_shape[1]})")
+            raise ValueError(f"Unexpected raw_ts shape: {raw_ts.shape}, expect=(*,{self.raw_ts_shape[0]},{self.raw_ts_shape[1]})")
         if dag_adj.ndim != 2 or dag_adj.shape[0] != dag_adj.shape[1] or dag_adj.shape[0] != raw_ts.shape[0]:
-            raise ValueError(f"dag_adj shape 异常: {dag_adj.shape}, raw_ts={raw_ts.shape}")
+            raise ValueError(f"Unexpected dag_adj shape: {dag_adj.shape}, raw_ts={raw_ts.shape}")
         if len(prompts) != raw_ts.shape[0]:
-            raise ValueError(f"prompts 数量与 raw_ts 不一致: prompts={len(prompts)}, raw_ts={raw_ts.shape}")
+            raise ValueError(f"number of prompts does not match raw_ts: prompts={len(prompts)}, raw_ts={raw_ts.shape}")
         if len(city_names) != raw_ts.shape[0]:
-            raise ValueError(f"city_names 数量与 raw_ts 不一致: city_names={len(city_names)}, raw_ts={raw_ts.shape}")
+            raise ValueError(f"number of city_names does not match raw_ts: city_names={len(city_names)}, raw_ts={raw_ts.shape}")
 
         raw_ts = self._maybe_fuse_root_raw_ts(raw_ts=raw_ts, is_root=is_root)
 
@@ -607,7 +607,7 @@ class DagGroupCollator:
 
     def __call__(self, features: List[Dict[str, Any]]) -> Dict[str, Any]:
         if len(features) != 1:
-            raise ValueError(f"dagresidual v1 只支持 batch_size=1，实际收到 {len(features)}")
+            raise ValueError(f"dagresidual v1 supports only batch_size=1, got {len(features)}")
         x = features[0]
         pad_id = self.tokenizer.pad_token_id
         token_ids = x["token_ids"]
@@ -985,9 +985,9 @@ def main() -> None:
         },
     )
 
-    print("\n✅ 训练完成。")
-    print("注意：final_adapter 现在对应的是 best checkpoint（不是最后一个 epoch）。")
-    print(f"已保存：\n  {args.out_dir}\n  {Path(args.out_dir) / 'final_adapter'}")
+    print("\nTraining finished.")
+    print("Note: final_adapter holds the best checkpoint, not the last epoch.")
+    print(f"Saved:\n  {args.out_dir}\n  {Path(args.out_dir) / 'final_adapter'}")
     if trainer_state_summary:
         print(f"trainer_state_summary = {trainer_state_summary}")
     if eval_metrics:
